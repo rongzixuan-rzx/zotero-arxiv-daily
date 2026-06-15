@@ -8,6 +8,14 @@ source:
   arxiv:
     category: null # The categories of target arxiv papers. Find the abbr of your research area from [here](https://arxiv.org/category_taxonomy). Example: ["cs.AI","cs.CV","cs.LG","cs.CL"]
     include_cross_list: false # Whether to include arXiv cross-list papers in subscribed categories. Example: true
+    start_date: null # The inclusive start date of papers to retrieve. Example: "2024-01-01" or "2024/01"
+    end_date: null # The inclusive end date of papers to retrieve. Example: "2026-06-15"
+    include_keywords: null # A paper must contain at least one of these keywords in title/abstract. Example: ["smart contract","solidity"]
+    required_keyword_groups: null # Each group requires at least one hit. Example: [["smart contract","solidity","evm"],["vulnerability","security","audit"]]
+    exclude_keywords: null # Papers containing these keywords in title/abstract will be dropped. Example: ["malware","vehicle"]
+    priority_keywords: null # Matched keywords are used for pre-ranking and a small final rerank bonus. Example: ["smart contract vulnerability","solidity","symbolic execution"]
+    candidate_pool_size: null # Keep only the top N candidates after metadata filtering but before expensive full-text extraction. Example: 200
+    max_results: null # arXiv API max_results. Keep null for all matches, or set a cap such as 500.
   biorxiv:
     category: null # The categories of target biorxiv papers. Find categories from [here](https://www.biorxiv.org/). Example: ["biochemistry","animal behavior and cognition"]
   medrxiv:

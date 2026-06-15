@@ -4,7 +4,6 @@ from arxiv import Result as ArxivResult
 from ..protocol import Paper
 from ..utils import extract_markdown_from_pdf, extract_tex_code_from_tar
 from tempfile import TemporaryDirectory
-import feedparser
 from tqdm import tqdm
 import multiprocessing
 import os
@@ -13,12 +12,95 @@ from time import sleep
 from typing import Any, Callable, TypeVar
 from loguru import logger
 import requests
+from datetime import datetime
+from omegaconf import ListConfig
 
 T = TypeVar("T")
 
 DOWNLOAD_TIMEOUT = (10, 60)
 PDF_EXTRACT_TIMEOUT = 180
 TAR_EXTRACT_TIMEOUT = 180
+
+
+def _normalize_keywords(values: list[str] | ListConfig | None, config_key: str) -> list[str]:
+    if values is None:
+        return []
+    if not isinstance(values, (list, ListConfig)):
+        raise TypeError(f"config.source.arxiv.{config_key} must be a list of strings or null.")
+    keywords = []
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError(f"config.source.arxiv.{config_key} must contain only strings.")
+        keyword = value.strip().lower()
+        if keyword:
+            keywords.append(keyword)
+    return keywords
+
+
+def _normalize_keyword_groups(
+    values: list[list[str]] | ListConfig | None,
+    config_key: str,
+) -> list[list[str]]:
+    if values is None:
+        return []
+    if not isinstance(values, (list, ListConfig)):
+        raise TypeError(f"config.source.arxiv.{config_key} must be a list of string lists or null.")
+
+    groups: list[list[str]] = []
+    for group in values:
+        if not isinstance(group, (list, ListConfig)):
+            raise TypeError(f"config.source.arxiv.{config_key} must contain only string lists.")
+        normalized_group = _normalize_keywords(group, config_key)
+        if normalized_group:
+            groups.append(normalized_group)
+    return groups
+
+
+def _parse_date(value: str | None, config_key: str) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"config.source.arxiv.{config_key} must be a string like '2024-01-01' or '2024/01'.")
+
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m", "%Y/%m"):
+        try:
+            parsed = datetime.strptime(value, fmt)
+            if fmt in ("%Y-%m", "%Y/%m"):
+                parsed = parsed.replace(day=1)
+            return parsed
+        except ValueError:
+            continue
+    raise ValueError(f"config.source.arxiv.{config_key} must use YYYY-MM-DD, YYYY/MM/DD, YYYY-MM, or YYYY/MM format.")
+
+
+def _paper_datetime(paper: ArxivResult) -> datetime:
+    paper_dt = getattr(paper, "published", None) or getattr(paper, "updated", None)
+    if paper_dt is None:
+        return datetime.min
+    return paper_dt.replace(tzinfo=None)
+
+
+def _paper_text(paper: ArxivResult) -> str:
+    return f"{paper.title}\n{paper.summary}".lower()
+
+
+def _contains_any(text: str, keywords: list[str]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _matches_groups(text: str, keyword_groups: list[list[str]]) -> bool:
+    return all(any(keyword in text for keyword in group) for group in keyword_groups)
+
+
+def _keyword_priority_score(text: str, priority_keywords: list[str], required_keyword_groups: list[list[str]]) -> int:
+    score = sum(1 for keyword in priority_keywords if keyword in text)
+    score += sum(sum(1 for keyword in group if keyword in text) for group in required_keyword_groups)
+    return score
+
+
+def _query_term(term: str) -> str:
+    escaped = term.replace('"', "")
+    return f'all:"{escaped}"'
 
 
 def _download_file(url: str, path: str) -> None:
@@ -112,48 +194,91 @@ class ArxivRetriever(BaseRetriever):
         super().__init__(config)
         if self.config.source.arxiv.category is None:
             raise ValueError("category must be specified for arxiv.")
+        self.categories = set(self.config.source.arxiv.category)
+        self.include_cross_list = self.config.source.arxiv.get("include_cross_list", False)
+        self.start_date = _parse_date(self.retriever_config.get("start_date"), "start_date")
+        self.end_date = _parse_date(self.retriever_config.get("end_date"), "end_date")
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValueError("config.source.arxiv.end_date must be later than or equal to start_date.")
+        self.include_keywords = _normalize_keywords(self.retriever_config.get("include_keywords"), "include_keywords")
+        self.exclude_keywords = _normalize_keywords(self.retriever_config.get("exclude_keywords"), "exclude_keywords")
+        self.priority_keywords = _normalize_keywords(self.retriever_config.get("priority_keywords"), "priority_keywords")
+        self.required_keyword_groups = _normalize_keyword_groups(
+            self.retriever_config.get("required_keyword_groups"),
+            "required_keyword_groups",
+        )
+        self.candidate_pool_size = self.retriever_config.get("candidate_pool_size")
+        self.max_results = self.retriever_config.get("max_results")
+
+    def _build_query(self) -> str:
+        clauses = [f"({' OR '.join(f'cat:{category}' for category in sorted(self.categories))})"]
+        if self.start_date or self.end_date:
+            start = (self.start_date or datetime(1991, 1, 1)).strftime("%Y%m%d0000")
+            end = (self.end_date or datetime.utcnow()).strftime("%Y%m%d2359")
+            clauses.append(f"submittedDate:[{start} TO {end}]")
+        for group in self.required_keyword_groups:
+            clauses.append(f"({' OR '.join(_query_term(keyword) for keyword in group)})")
+        if self.include_keywords:
+            clauses.append(f"({' OR '.join(_query_term(keyword) for keyword in self.include_keywords)})")
+        return " AND ".join(clauses)
+
+    def _category_matches(self, paper: ArxivResult) -> bool:
+        paper_categories = set(getattr(paper, "categories", []) or [])
+        if self.include_cross_list:
+            return bool(self.categories & paper_categories)
+        return getattr(paper, "primary_category", None) in self.categories
+
+    def _date_matches(self, paper: ArxivResult) -> bool:
+        paper_dt = _paper_datetime(paper)
+        if self.start_date and paper_dt < self.start_date:
+            return False
+        if self.end_date and paper_dt > self.end_date.replace(hour=23, minute=59, second=59):
+            return False
+        return True
+
+    def _keyword_matches(self, paper: ArxivResult) -> bool:
+        text = _paper_text(paper)
+        if self.required_keyword_groups and not _matches_groups(text, self.required_keyword_groups):
+            return False
+        if self.include_keywords and not _contains_any(text, self.include_keywords):
+            return False
+        if self.exclude_keywords and _contains_any(text, self.exclude_keywords):
+            return False
+        return True
+
+    def _prioritize(self, papers: list[ArxivResult]) -> list[ArxivResult]:
+        def rank_key(paper: ArxivResult) -> tuple[int, datetime]:
+            text = _paper_text(paper)
+            priority_score = _keyword_priority_score(text, self.priority_keywords, self.required_keyword_groups)
+            return priority_score, _paper_datetime(paper)
+
+        papers = sorted(papers, key=rank_key, reverse=True)
+        if self.candidate_pool_size:
+            papers = papers[: self.candidate_pool_size]
+        return papers
 
     def _retrieve_raw_papers(self) -> list[ArxivResult]:
         client = arxiv.Client(num_retries=10, delay_seconds=10)
-        query = '+'.join(self.config.source.arxiv.category)
-        include_cross_list = self.config.source.arxiv.get("include_cross_list", False)
-        # Get the latest paper from arxiv rss feed
-        feed = feedparser.parse(f"https://rss.arxiv.org/atom/{query}")
-        if 'Feed error for query' in feed.feed.title:
-            raise Exception(f"Invalid ARXIV_QUERY: {query}.")
-        raw_papers = []
-        allowed_announce_types = {"new", "cross"} if include_cross_list else {"new"}
-        all_paper_ids = [
-            i.id.removeprefix("oai:arXiv.org:")
-            for i in feed.entries
-            if i.get("arxiv_announce_type", "new") in allowed_announce_types
-        ]
+        query = self._build_query()
+        logger.info(f"Using arXiv query: {query}")
+        search = arxiv.Search(
+            query=query,
+            max_results=self.max_results,
+            sort_by=arxiv.SortCriterion.SubmittedDate,
+            sort_order=arxiv.SortOrder.Descending,
+        )
+        raw_papers = list(client.results(search))
+        logger.info(f"Retrieved {len(raw_papers)} raw arXiv hits before filtering")
+        raw_papers = [paper for paper in raw_papers if self._category_matches(paper)]
+        logger.info(f"{len(raw_papers)} papers remain after category filtering")
+        raw_papers = [paper for paper in raw_papers if self._date_matches(paper)]
+        logger.info(f"{len(raw_papers)} papers remain after date filtering")
+        raw_papers = [paper for paper in raw_papers if self._keyword_matches(paper)]
+        logger.info(f"{len(raw_papers)} papers remain after keyword filtering")
+        raw_papers = self._prioritize(raw_papers)
+        logger.info(f"{len(raw_papers)} papers remain after priority sorting and candidate pool limiting")
         if self.config.executor.debug:
-            all_paper_ids = all_paper_ids[:10]
-
-        # Get full information of each paper from arxiv api
-        bar = tqdm(total=len(all_paper_ids))
-        max_batch_retries = 5
-        batch_retry_delay = 30
-        for i in range(0, len(all_paper_ids), 20):
-            search = arxiv.Search(id_list=all_paper_ids[i:i + 20])
-            for attempt in range(max_batch_retries):
-                try:
-                    batch = list(client.results(search))
-                    bar.update(len(batch))
-                    raw_papers.extend(batch)
-                    break
-                except arxiv.HTTPError as exc:
-                    if exc.status == 429 and attempt < max_batch_retries - 1:
-                        wait = batch_retry_delay * (attempt + 1)
-                        logger.warning(f"arXiv API 429 on batch {i // 20}, retry {attempt + 1}/{max_batch_retries} in {wait}s")
-                        sleep(wait)
-                    else:
-                        raise
-            if i + 20 < len(all_paper_ids):
-                sleep(3)
-        bar.close()
-
+            raw_papers = raw_papers[:10]
         return raw_papers
 
     def convert_to_paper(self, raw_paper: ArxivResult) -> Paper:

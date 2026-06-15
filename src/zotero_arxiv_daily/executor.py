@@ -29,6 +29,10 @@ def normalize_path_patterns(patterns: list[str] | ListConfig | None, config_key:
     return list(patterns)
 
 
+def normalize_title(title: str) -> str:
+    return " ".join(title.lower().split())
+
+
 class Executor:
     def __init__(self, config:DictConfig):
         self.config = config
@@ -96,6 +100,7 @@ class Executor:
         if len(corpus) == 0:
             logger.error(f"No zotero papers found. Please check your zotero settings:\n{self.config.zotero}")
             return
+        corpus_titles = {normalize_title(c.title) for c in corpus}
         all_papers = []
         for source, retriever in self.retrievers.items():
             logger.info(f"Retrieving {source} papers...")
@@ -103,6 +108,9 @@ class Executor:
             if len(papers) == 0:
                 logger.info(f"No {source} papers found")
                 continue
+            before_dedup = len(papers)
+            papers = [p for p in papers if normalize_title(p.title) not in corpus_titles]
+            logger.info(f"Removed {before_dedup - len(papers)} papers already present in Zotero")
             logger.info(f"Retrieved {len(papers)} {source} papers")
             all_papers.extend(papers)
         logger.info(f"Total {len(all_papers)} papers retrieved from all sources")
