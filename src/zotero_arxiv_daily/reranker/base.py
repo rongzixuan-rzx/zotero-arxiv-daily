@@ -23,6 +23,8 @@ class BaseReranker(ABC):
         return candidates
 
     def _keyword_bonus(self, candidates: list[Paper]) -> np.ndarray:
+        if self.config is None:
+            return np.zeros(len(candidates))
         arxiv_config = getattr(self.config.source, "arxiv", None)
         if arxiv_config is None:
             return np.zeros(len(candidates))
