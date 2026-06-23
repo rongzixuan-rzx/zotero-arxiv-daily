@@ -16,6 +16,20 @@ source:
     priority_keywords: null # Matched keywords are used for pre-ranking and a small final rerank bonus. Example: ["smart contract vulnerability","solidity","symbolic execution"]
     candidate_pool_size: null # Keep only the top N candidates after metadata filtering but before expensive full-text extraction. Example: 200
     max_results: null # arXiv API max_results. Keep null for all matches, or set a cap such as 500.
+  openalex:
+    journals: null # Journals to track. Example: ["IEEE Transactions on Software Engineering"]
+    conferences: null # Conferences to track. Example: ["ICSE","ASE","USENIX Security Symposium"]
+    source_ids: null # Optional OpenAlex source IDs for exact venue targeting. Example: ["https://openalex.org/S123456789"]
+    start_date: null # Inclusive start date. Example: "2024-01-01"
+    end_date: null # Inclusive end date. Example: "2026-06-21"
+    include_keywords: null # At least one of these keywords must appear in title/abstract if set.
+    required_keyword_groups: null # Each group requires at least one keyword hit.
+    exclude_keywords: null # Drop papers containing these keywords.
+    priority_keywords: null # Used for pre-ranking inside the venue-specific candidate pool.
+    candidate_pool_size: 200 # Keep only the top N venue-filtered candidates before reranking.
+    max_pages: 3 # Number of OpenAlex pages to fetch per venue.
+    per_page: 50 # OpenAlex page size per venue.
+    work_types: ["article","proceedings-article"] # Allowed OpenAlex work types.
   biorxiv:
     category: null # The categories of target biorxiv papers. Find categories from [here](https://www.biorxiv.org/). Example: ["biochemistry","animal behavior and cognition"]
   medrxiv:

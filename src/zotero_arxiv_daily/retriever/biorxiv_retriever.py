@@ -57,5 +57,8 @@ class BiorxivRetriever(BaseRetriever):
             abstract=abstract,
             url=pdf_url,
             pdf_url=pdf_url,
-            full_text=full_text
+            full_text=full_text,
+            venue=self.server,
+            published_date=raw_paper.get("date"),
+            doi=raw_paper.get("doi"),
         )

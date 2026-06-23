@@ -299,6 +299,8 @@ class ArxivRetriever(BaseRetriever):
             url=raw_paper.entry_id,
             pdf_url=pdf_url,
             full_text=full_text,
+            venue="arXiv",
+            published_date=_paper_datetime(raw_paper).strftime("%Y-%m-%d"),
         )
 
 

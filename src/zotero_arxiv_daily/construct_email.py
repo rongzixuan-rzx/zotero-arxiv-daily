@@ -40,6 +40,35 @@ To unsubscribe, remove your email in your Github Action setting.
 </html>
 """
 
+
+def get_venue_summary_html(papers: list[Paper]) -> str:
+  venue_counts: dict[str, int] = {}
+  for paper in papers:
+    venue = paper.venue or f"{paper.source.upper()} (Unknown Venue)"
+    venue_counts[venue] = venue_counts.get(venue, 0) + 1
+
+  sorted_venues = sorted(venue_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+  rows = "".join(
+    f"<li><strong>{venue}</strong>: {count} paper{'s' if count != 1 else ''}</li>"
+    for venue, count in sorted_venues
+  )
+  return f"""
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-family: Arial, sans-serif; border: 1px solid #ddd; border-radius: 8px; padding: 16px; background-color: #eef6ff;">
+    <tr>
+      <td style="font-size: 18px; font-weight: bold; color: #1f4b7a; padding-bottom: 8px;">
+        Venues Covered This Run
+      </td>
+    </tr>
+    <tr>
+      <td style="font-size: 14px; color: #333;">
+        <ul style="margin: 0; padding-left: 20px;">
+          {rows}
+        </ul>
+      </td>
+    </tr>
+  </table>
+  """
+
 def get_empty_html():
   block_template = """
   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-family: Arial, sans-serif; border: 1px solid #ddd; border-radius: 8px; padding: 16px; background-color: #f9f9f9;">
@@ -52,7 +81,17 @@ def get_empty_html():
   """
   return block_template
 
-def get_block_html(title:str, authors:str, rate:str, tldr:str, pdf_url:str, affiliations:str=None):
+def get_block_html(
+    title:str,
+    authors:str,
+    rate:str,
+    tldr:str,
+    pdf_url:str,
+    affiliations:str=None,
+    venue:str="Unknown Venue",
+    published_date:str="Unknown Date",
+    source:str="unknown",
+):
     block_template = """
     <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-family: Arial, sans-serif; border: 1px solid #ddd; border-radius: 8px; padding: 16px; background-color: #f9f9f9;">
     <tr>
@@ -74,18 +113,37 @@ def get_block_html(title:str, authors:str, rate:str, tldr:str, pdf_url:str, affi
     </tr>
     <tr>
         <td style="font-size: 14px; color: #333; padding: 8px 0;">
+            <strong>Venue:</strong> {venue}
+            <br>
+            <strong>Published:</strong> {published_date}
+            <br>
+            <strong>Source:</strong> {source}
+        </td>
+    </tr>
+    <tr>
+        <td style="font-size: 14px; color: #333; padding: 8px 0;">
             <strong>TLDR:</strong> {tldr}
         </td>
     </tr>
 
     <tr>
         <td style="padding: 8px 0;">
-            <a href="{pdf_url}" style="display: inline-block; text-decoration: none; font-size: 14px; font-weight: bold; color: #fff; background-color: #d9534f; padding: 8px 16px; border-radius: 4px;">PDF</a>
+            <a href="{pdf_url}" style="display: inline-block; text-decoration: none; font-size: 14px; font-weight: bold; color: #fff; background-color: #d9534f; padding: 8px 16px; border-radius: 4px;">Open Paper</a>
         </td>
     </tr>
 </table>
 """
-    return block_template.format(title=title, authors=authors,rate=rate, tldr=tldr, pdf_url=pdf_url, affiliations=affiliations)
+    return block_template.format(
+        title=title,
+        authors=authors,
+        rate=rate,
+        tldr=tldr,
+        pdf_url=pdf_url,
+        affiliations=affiliations,
+        venue=venue,
+        published_date=published_date,
+        source=source,
+    )
 
 def get_stars(score:float):
     full_star = '<span class="full-star">⭐</span>'
@@ -108,6 +166,7 @@ def render_email(papers:list[Paper]) -> str:
     parts = []
     if len(papers) == 0 :
         return framework.replace('__CONTENT__', get_empty_html())
+    parts.append(get_venue_summary_html(papers))
     
     for p in papers:
         #rate = get_stars(p.score)
@@ -125,7 +184,10 @@ def render_email(papers:list[Paper]) -> str:
                 affiliations += ', ...'
         else:
             affiliations = 'Unknown Affiliation'
-        parts.append(get_block_html(p.title, authors, rate, p.tldr, p.pdf_url, affiliations))
+        venue = p.venue or 'Unknown Venue'
+        published_date = p.published_date or 'Unknown Date'
+        paper_link = p.pdf_url or p.url
+        parts.append(get_block_html(p.title, authors, rate, p.tldr, paper_link, affiliations, venue, published_date, p.source))
 
     content = '<br>' + '</br><br>'.join(parts) + '</br>'
     return framework.replace('__CONTENT__', content)

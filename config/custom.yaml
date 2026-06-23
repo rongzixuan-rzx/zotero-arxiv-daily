@@ -38,7 +38,41 @@ source:
       - "program analysis"
     candidate_pool_size: 200
     max_results: 500
+  openalex:
+    journals:
+      - "IEEE Transactions on Software Engineering"
+      - "ACM Transactions on Software Engineering and Methodology"
+      - "Empirical Software Engineering"
+      - "Computers & Security"
+    conferences:
+      - "ICSE"
+      - "ASE"
+      - "ISSTA"
+      - "USENIX Security Symposium"
+      - "ACM SIGSAC Conference on Computer and Communications Security"
+      - "Network and Distributed System Security Symposium"
+      - "WWW"
+    source_ids: null
+    start_date: "2024-01-01"
+    end_date: null
+    include_keywords: null
+    required_keyword_groups:
+      - ["smart contract", "solidity", "evm"]
+      - ["vulnerability", "security", "audit", "auditing", "bug", "detection"]
+    exclude_keywords: ["malware", "intrusion detection", "vehicle", "internet of vehicles", "medical"]
+    priority_keywords:
+      - "smart contract vulnerability"
+      - "smart contract security"
+      - "solidity"
+      - "evm"
+      - "symbolic execution"
+      - "formal verification"
+      - "program analysis"
+    candidate_pool_size: 100
+    max_pages: 2
+    per_page: 50
+    work_types: ["article","proceedings-article"]
 
 executor:
   debug: ${oc.env:DEBUG,null}
-  source: ['arxiv']
+  source: ['arxiv', 'openalex']

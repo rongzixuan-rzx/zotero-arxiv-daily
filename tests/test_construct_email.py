@@ -5,11 +5,14 @@ from tests.canned_responses import make_sample_paper
 
 
 def test_render_email_with_papers():
-    papers = [make_sample_paper(score=7.5, tldr="A great paper.", affiliations=["MIT"])]
+    papers = [make_sample_paper(score=7.5, tldr="A great paper.", affiliations=["MIT"], venue="ICSE", published_date="2026-06-01")]
     html = render_email(papers)
     assert "Sample Paper Title" in html
     assert "A great paper." in html
     assert "MIT" in html
+    assert "ICSE" in html
+    assert "2026-06-01" in html
+    assert "Venues Covered This Run" in html
 
 
 def test_render_email_empty_list():
@@ -64,13 +67,16 @@ def test_get_stars_mid_score():
 
 
 def test_get_block_html_contains_all_fields():
-    html = get_block_html("Title", "Auth", "3.5", "Summary", "http://pdf.url", "MIT")
+    html = get_block_html("Title", "Auth", "3.5", "Summary", "http://pdf.url", "MIT", "ICSE", "2026-06-01", "openalex")
     assert "Title" in html
     assert "Auth" in html
     assert "3.5" in html
     assert "Summary" in html
     assert "http://pdf.url" in html
     assert "MIT" in html
+    assert "ICSE" in html
+    assert "2026-06-01" in html
+    assert "openalex" in html
 
 
 def test_get_empty_html():
